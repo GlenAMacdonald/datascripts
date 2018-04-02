@@ -45,7 +45,7 @@ def get_sym(sym,tablelist,bqc,job_config):
 def get_symq(symq,qout,tablelist,bqc,job_config):
     sym = symq.get()
     df = get_sym(sym,tablelist,bqc,job_config)
-    qout.put(df)
+    qout.put([df,sym])
     symq.task_done()
     return
 
@@ -60,6 +60,7 @@ def get_many_syms(syms,tablelist,bqc,job_config):
     qout = Queue.Queue()
     numthreads = 5
     threads = []
+    symlist = []
     for sym in syms:
         symq.put((sym))
     for i in range(numthreads):
@@ -70,18 +71,19 @@ def get_many_syms(syms,tablelist,bqc,job_config):
     for i in threads:
         i.join()
     for i in range(qout.qsize()):
-        dflist.append(qout.get())
-    multidf = pd.concat(dflist, keys=syms)
+        [df,sym] = qout.get()
+        symlist.append(sym)
+        dflist.append(df)
+    multidf = pd.concat(dflist, keys=symlist)
     return multidf
 
+syms = ['BTC']
+tablelist = get_table_list(bqc,job_config)
+df = get_many_syms(syms,tablelist,bqc,job_config)
+dset = df
 
-
-
-
-
-tl = get_table_list(bqc,job_config)
-sym = 'ETH'
-df = get_sym(sym,tl,bqc,job_config)
-sym2 = 'BTC'
-df2 = get_sym(sym2,tl,bqc,job_config)
+#sym = 'ETH'
+#df = get_sym(sym,tl,bqc,job_config)
+#sym2 = 'BTC'
+#df2 = get_sym(sym2,tl,bqc,job_config)
 
