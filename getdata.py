@@ -2,6 +2,7 @@ from google.cloud import bigquery
 import pandas as pd
 import Queue
 import threading
+import datetime
 import logging
 
 
@@ -13,6 +14,9 @@ job_config = bigquery.QueryJobConfig()
 job_config.use_legacy_sql = False
 dataset_ref = bqc.dataset(dataset_id)
 
+def get_time_str():
+    timestring = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    return timestring
 
 def query(query,bqc,job_config):
     query_job = bqc.query(query,job_config=job_config)
@@ -38,8 +42,20 @@ def get_sym(sym,tablelist,bqc,job_config):
     tableid = tablelist.loc[sym]['TableID']
     q = "SELECT * from `cmcdataset.{}` ORDER BY timestamp".format(tableid)
     query_job = query(q,bqc,job_config)
+    print "Getting {} at {}".format(sym, get_time_str())
     df = query_job_2df(query_job)
     df.set_index('timestamp',inplace=True)
+    print "Got {} at {}".format(sym, get_time_str())
+    return df
+
+def get_sym_after(sym,tablelist,lastupdated,bqc,job_config):
+    tableid = tablelist.loc[sym]['TableID']
+    q = 'SELECT * FROM `cmcdataset.{}` WHERE timestamp > TIMESTAMP("'"{}:00"'") ORDER BY timestamp'.format(tableid, lastupdated)
+    query_job = query(q,bqc,job_config)
+    print "Getting {} at {}".format(sym, get_time_str())
+    df = query_job_2df(query_job)
+    df.set_index('timestamp',inplace=True)
+    print "Got {} at {}".format(sym, get_time_str())
     return df
 
 def get_symq(symq,qout,tablelist,bqc,job_config):
@@ -58,7 +74,7 @@ def get_many_syms(syms,tablelist,bqc,job_config):
     dflist = []
     symq = Queue.Queue()
     qout = Queue.Queue()
-    numthreads = 5
+    numthreads = 10
     threads = []
     symlist = []
     for sym in syms:
@@ -77,10 +93,10 @@ def get_many_syms(syms,tablelist,bqc,job_config):
     multidf = pd.concat(dflist, keys=symlist)
     return multidf
 
-syms = ['BTC']
-tablelist = get_table_list(bqc,job_config)
-df = get_many_syms(syms,tablelist,bqc,job_config)
-dset = df
+# syms = ['BTC']
+# tablelist = get_table_list(bqc,job_config)
+# df = get_many_syms(syms,tablelist,bqc,job_config)
+# dset = df
 
 #sym = 'ETH'
 #df = get_sym(sym,tl,bqc,job_config)

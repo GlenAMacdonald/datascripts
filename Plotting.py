@@ -1,3 +1,6 @@
+
+
+
 from bokeh.plotting import figure, show, output_file
 import numpy
 
@@ -40,7 +43,7 @@ pbtc = pd.DataFrame(dset.loc[sym].price_btc)
 pbtc = pbtc.price_btc
 pusd = pd.DataFrame(dset.loc[sym].price_usd)
 pusd = pusd.price_usd
-pdiff = numpy.log(1+pusd.pct_change())
+pdiff = np.log(1+pusd.pct_change())
 
 
 '''
@@ -92,3 +95,24 @@ for i in w:
     p8.line(y = psum,x = volume.index)
     output_file('psum{}{}.html'.format(i,sym))
     show(p8)
+
+###-----------------------------
+
+eIMFs = vIMFs
+nIMFs = eIMFs.shape[0]
+
+# Plot results
+plt.figure(figsize=(12, 9))
+plt.subplot(nIMFs + 1, 1, 1)
+plt.plot(volume.index, volume.vol_24h, 'r')
+
+for n in range(nIMFs):
+    plt.subplot(nIMFs + 1, 1, n + 2)
+    plt.plot(volume.index, eIMFs[n], 'g')
+    plt.ylabel("eIMF %i" % (n + 1))
+    plt.locator_params(axis='y', nbins=5)
+
+p3 = figure(x_axis_type="datetime", plot_width=800, plot_height=350)
+p3.line(y=eIMFs[-1], x=volume.index)
+output_file('vimf{}.html'.format(sym))
+show(p3)
