@@ -48,16 +48,6 @@ def get_sym(sym,tablelist,bqc,job_config):
     print "Got {} at {}".format(sym, get_time_str())
     return df
 
-def get_sym_after(sym,tablelist,lastupdated,bqc,job_config):
-    tableid = tablelist.loc[sym]['TableID']
-    q = 'SELECT * FROM `cmcdataset.{}` WHERE timestamp > TIMESTAMP("'"{}:00"'") ORDER BY timestamp'.format(tableid, lastupdated)
-    query_job = query(q,bqc,job_config)
-    print "Getting {} at {}".format(sym, get_time_str())
-    df = query_job_2df(query_job)
-    df.set_index('timestamp',inplace=True)
-    print "Got {} at {}".format(sym, get_time_str())
-    return df
-
 def get_symq(symq,qout,tablelist,bqc,job_config):
     sym = symq.get()
     df = get_sym(sym,tablelist,bqc,job_config)
@@ -81,6 +71,51 @@ def get_many_syms(syms,tablelist,bqc,job_config):
         symq.put((sym))
     for i in range(numthreads):
         t = threading.Thread(target=get_sym_loop,args = (symq,qout,tablelist,bqc,job_config))
+        threads.append(t)
+    for i in threads:
+        i.start()
+    for i in threads:
+        i.join()
+    for i in range(qout.qsize()):
+        [df,sym] = qout.get()
+        symlist.append(sym)
+        dflist.append(df)
+    multidf = pd.concat(dflist, keys=symlist)
+    return multidf
+
+def get_sym_after(sym,tablelist,lastupdate,bqc,job_config):
+    tableid = tablelist.loc[sym]['TableID']
+    q = 'SELECT * FROM `cmcdataset.{}` WHERE timestamp > TIMESTAMP("'"{}:00"'") ORDER BY timestamp'.format(tableid, lastupdate)
+    query_job = query(q,bqc,job_config)
+    print "Getting {} at {}".format(sym, get_time_str())
+    df = query_job_2df(query_job)
+    df.set_index('timestamp',inplace=True)
+    print "Got {} at {}".format(sym, get_time_str())
+    return df
+
+def upd_symq(symq,qout,tablelist,bqc,job_config):
+    [sym, lastupdate] = symq.get()
+    df = get_sym_after(sym,tablelist,lastupdate,bqc,job_config)
+    qout.put([df,sym])
+    symq.task_done()
+    return
+
+def upd_sym_loop(symq,qout,tablelist,bqc,job_config):
+    while symq.qsize() > 0:
+        upd_symq(symq, qout, tablelist, bqc, job_config)
+    return
+
+def upd_many_syms(syms,tablelist,lastupdated,bqc,job_config):
+    dflist = []
+    symq = Queue.Queue()
+    qout = Queue.Queue()
+    numthreads = 10
+    threads = []
+    symlist = []
+    for i in range(len(syms)):
+        symq.put(([syms[i],lastupdated[i]]))
+    for i in range(numthreads):
+        t = threading.Thread(target=upd_sym_loop,args = (symq,qout,tablelist,bqc,job_config))
         threads.append(t)
     for i in threads:
         i.start()

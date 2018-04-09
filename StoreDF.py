@@ -33,7 +33,7 @@ def identify_top200():
 def init_dl_top200(top200):
     syms = top200.symbol.tolist()
     tablelist = getdata.get_table_list(getdata.bqc,getdata.job_config)
-    data = getdata.get_many_syms(syms, tablelist, getdata.bqc, getdata.job_config)
+    data = getdata.get_many_syms(syms, tablelist, getdata.bqc, getdata.job_config, 'all')
     data.columns = data.columns.astype(str)
     data.index.set_levels(data.index.levels[0].astype(str), level=0, inplace=True)
     return data
@@ -83,6 +83,7 @@ def update_top200(datasetname):
     newsyms = list(set(top200syms).difference(tlisth5syms))
     existingsyms = list(set(top200syms).intersection(tlisth5syms))
     tablelist = getdata.get_table_list(getdata.bqc, getdata.job_config)
+    lastupdated = []
     if newsyms:
         for sym in newsyms:
             newdf = getdata.get_sym(sym, tablelist, getdata.bqc, getdata.job_config)
@@ -90,9 +91,12 @@ def update_top200(datasetname):
             newrow = pd.DataFrame(0,columns=['last_updated'],index=[sym])
             tlisth5 = tlisth5.append(newrow)
     for sym in existingsyms:
-        lastupdated = tlisth5.loc[sym][0]
-        df = getdata.get_sym_after(sym, tablelist, lastupdated, getdata.bqc, getdata.job_config)
+        lastupdated.append(tlisth5.loc[sym][0])
+    multidf = getdata.upd_many_syms(existingsyms, tablelist, lastupdated, getdata.bqc, getdata.job_config)
+    for sym in multidf.index.levels[0]:
+        df = multidf.loc[sym]
         store.append(sym,df,format='table')
+    ud_dset_tlist(datasetname)
     return
 
 top200 = identify_top200()
