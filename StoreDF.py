@@ -100,4 +100,5 @@ def update_top200(datasetname):
     return
 
 top200 = identify_top200()
-top200df = init_dl_top200(top200)
+lastupdate = get_last_update(datasetname)
+update_top200(datasetname)

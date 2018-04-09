@@ -42,10 +42,10 @@ def get_sym(sym,tablelist,bqc,job_config):
     tableid = tablelist.loc[sym]['TableID']
     q = "SELECT * from `cmcdataset.{}` ORDER BY timestamp".format(tableid)
     query_job = query(q,bqc,job_config)
-    print "Getting {} at {}".format(sym, get_time_str())
+    #print "Getting {} at {}".format(sym, get_time_str())
     df = query_job_2df(query_job)
     df.set_index('timestamp',inplace=True)
-    print "Got {} at {}".format(sym, get_time_str())
+    #print "Got {} at {}".format(sym, get_time_str())
     return df
 
 def get_symq(symq,qout,tablelist,bqc,job_config):
@@ -87,10 +87,10 @@ def get_sym_after(sym,tablelist,lastupdate,bqc,job_config):
     tableid = tablelist.loc[sym]['TableID']
     q = 'SELECT * FROM `cmcdataset.{}` WHERE timestamp > TIMESTAMP("'"{}:00"'") ORDER BY timestamp'.format(tableid, lastupdate)
     query_job = query(q,bqc,job_config)
-    print "Getting {} at {}".format(sym, get_time_str())
+    #print "Getting {} at {}".format(sym, get_time_str())
     df = query_job_2df(query_job)
     df.set_index('timestamp',inplace=True)
-    print "Got {} at {}".format(sym, get_time_str())
+    #print "Got {} at {}".format(sym, get_time_str())
     return df
 
 def upd_symq(symq,qout,tablelist,bqc,job_config):
