@@ -90,6 +90,7 @@ def update_top200(datasetname):
             store.put(sym,newdf,format='table')
             newrow = pd.DataFrame(0,columns=['last_updated'],index=[sym])
             tlisth5 = tlisth5.append(newrow)
+        store.put('tablelistH5',tlisth5,format='table')
     for sym in existingsyms:
         lastupdated.append(tlisth5.loc[sym][0])
     multidf = getdata.upd_many_syms(existingsyms, tablelist, lastupdated, getdata.bqc, getdata.job_config)
@@ -97,6 +98,23 @@ def update_top200(datasetname):
         df = multidf.loc[sym]
         store.append(sym,df,format='table')
     ud_dset_tlist(datasetname)
+    store.close()
+    return
+
+def restore_tlisth5(datasetname):
+    store = select_HDFstore(datasetname)
+    keys = store.keys()
+    stripped_keys = list(map(lambda x: x.strip('/'), keys))
+    stripped_keys.remove('tablelistH5')
+    tlisth5 = pd.DataFrame(stripped_keys, columns=['sym'])
+    tlisth5['last_updated'] = 0
+    tlisth5.set_index('sym', drop=True, inplace=True)
+    tlisth5.index.name = None
+    for sym in stripped_keys:
+        data = store.get(sym)
+        tlisth5.loc[sym] = data.index[-1].strftime("%Y-%m-%d %H:%M")
+    store.put('tablelistH5',tlisth5,format='table')
+    store.close()
     return
 
 top200 = identify_top200()
