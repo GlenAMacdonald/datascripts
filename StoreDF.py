@@ -86,13 +86,22 @@ def update_top200(datasetname):
     lastupdated = []
     if newsyms:
         for sym in newsyms:
-            newdf = getdata.get_sym(sym, tablelist, getdata.bqc, getdata.job_config)
-            store.put(sym,newdf,format='table')
-            newrow = pd.DataFrame(0,columns=['last_updated'],index=[sym])
-            tlisth5 = tlisth5.append(newrow)
-        store.put('tablelistH5',tlisth5,format='table')
+            # This shitty error catch is for symbols that don't match to bigquery tables
+            try:
+                newdf = getdata.get_sym(sym, tablelist, getdata.bqc, getdata.job_config)
+                store.put(sym, newdf, format='table')
+                newrow = pd.DataFrame(datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), columns=['last_updated'],index=[sym])
+                tlisth5 = tlisth5.append(newrow)
+            except Exception as e:
+                print e
+        try:
+            store.put('tablelistH5',tlisth5,format='table')
+        except Exception as e:
+            print e
+    # get the date at which the local copy was last updated for all the symbols about to be updated
     for sym in existingsyms:
         lastupdated.append(tlisth5.loc[sym][0])
+    # Send the requests to update all the tables
     multidf = getdata.upd_many_syms(existingsyms, tablelist, lastupdated, getdata.bqc, getdata.job_config)
     for sym in multidf.index.levels[0]:
         df = multidf.loc[sym]
@@ -117,6 +126,11 @@ def restore_tlisth5(datasetname):
     store.close()
     return
 
+'''
 top200 = identify_top200()
 lastupdate = get_last_update(datasetname)
 update_top200(datasetname)
+
+restore_tlisth5(datasetname)
+
+'''
