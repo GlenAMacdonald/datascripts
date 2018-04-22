@@ -108,10 +108,18 @@ period = 21
 # How close to the end of the current data to stop the analysis (last update = 0) - in days
 periodend = 0
 # what columns should the analysis happen over
-column = 'price_usd'
+column = 'price_btc'
+df = avgrnkba(column,window,period,periodend)
+df2 = avgrnkba(column,6,7,0)
+df3 = avgrnkba(column,3,3,0)
 
-
-
+df3top40 = df3.iloc[-40:]
+dftop40 = df.iloc[-40:]
+top4021days = df3top40[df3top40.index.isin(dftop40.index)]
+top403days = df3top40[df3top40.index.isin(dftop40.index)]
+top40both21 = top4021days[top4021days.index.isin(top403days.index)]
+top40both3 = top407days[top407days.index.isin(top4021days.index)]
+# Obtain the average for a windowed 7hr period over a week, windowing this every day. Re
 
 
 #Graveyard
