@@ -2,6 +2,7 @@ import matplotlib
 import pandas as pd
 import datetime
 import coinmarketcap as cmc
+import sys
 sys.path.extend(['/home/Spare/CC/datascripts'])
 import getdata
 
@@ -17,6 +18,12 @@ def store_dset(datasetname, df, key):
     store.put(key, df, format='table')
     store.close()
     return
+
+def get_tlisth5(datasetname):
+    store = select_HDFstore(datasetname)
+    tlisth5 = store.get('tablelistH5')
+    store.close()
+    return tlisth5
 
 def append_dset(datasetname, df, key):
     store = select_HDFstore(datasetname)
@@ -106,8 +113,8 @@ def update_top200(datasetname):
     for sym in multidf.index.levels[0]:
         df = multidf.loc[sym]
         store.append(sym,df,format='table')
-    ud_dset_tlist(datasetname)
     store.close()
+    ud_dset_tlist(datasetname)
     return
 
 def restore_tlisth5(datasetname):

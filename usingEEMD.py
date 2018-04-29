@@ -1,6 +1,7 @@
 from PyEMD import EEMD
 import numpy as np
 import pylab as plt
+import mungeData
 
 # Define signal
 t = np.linspace(0, 1, 200)

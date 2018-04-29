@@ -1,13 +1,16 @@
 import pandas as pd
 import numpy as np
+import sys
+sys.path.extend(['/home/Spare/CC/datascripts'])
+import StoreDF
 
 datasetname = 'cmcdataset'
 
 #dset = get_dset(datasetname)
 
 def getclean_top200():
-    top200 = identify_top200()
-    store = select_HDFstore(datasetname)
+    top200 = StoreDF.identify_top200()
+    store = StoreDF.select_HDFstore(datasetname)
     tlisth5 = store.get('tablelistH5')
     store.close()
     top200 = top200[top200.symbol.isin(tlisth5.index)]
@@ -41,19 +44,19 @@ def conv_vol(dset):
 
 def conv_win_2_block(window,period,periodend):
     #window is in hours, convert to 5min blocks
-    window = window*12
+    window = int(window*12)
     #period is in days, convert to 5min blocks
-    period = period*24*12
+    period = int(period*24*12)
     if periodend == 0:
         periodend = 1
     else:
-        periodend = periodend*24*12
+        periodend = int(periodend*24*12)
     return [window,period,periodend]
 
 
 # for reference - column names are: vol_24h, mkt_cap, price_btc, price_usd, change_24h
 def window_dset(top200,window, column,period,periodend):
-    store = select_HDFstore(datasetname)
+    store = StoreDF.select_HDFstore(datasetname)
     syms = top200.symbol
     dflist = []
     for sym in syms:
@@ -70,7 +73,7 @@ def window_dset(top200,window, column,period,periodend):
 
 def getpoints(top200,column,period,periodend):
     syms = top200.symbol
-    store = select_HDFstore(datasetname)
+    store = StoreDF.select_HDFstore(datasetname)
     pchange = []
     for sym in syms:
         df = store.get(sym)
@@ -87,8 +90,7 @@ def getpoints(top200,column,period,periodend):
     store.close()
     return df
 
-def avgrnkba(column,win,per,perend):
-    top200 = getclean_top200()
+def avgrnkba(top200, column,win,per,perend):
     [window, period, periodend] = conv_win_2_block(win, per, perend)
     windf = window_dset(top200, window, column, period, periodend)
     rankdf = windf.rank(1, ascending=False)
@@ -99,7 +101,21 @@ def avgrnkba(column,win,per,perend):
     crankdf = pd.concat([mrankdf, srankdf, pchangedf], axis=1).sort_values(by=['mean'], ascending=False)
     return crankdf
 
+def topNcompare(df1,df2,column,N):
+    if N != 0:
+        df1.sort_values(by = column, ascending=False, inplace=True)
+        df2.sort_values(by = column, ascending=False, inplace=True)
+        df1 = df1.iloc[-N:]
+        df2 = df2.iloc[-N:]
+    topNboth1 = df1[df1.index.isin(df2.index)]
+    topNboth2 = df2[df2.index.isin(df1.index)]
+    topNboth = topNboth1[topNboth1.index.isin(topNboth2.index)]
+    return topNboth
 
+
+
+# Scripts to call for the daily currency shuffle.
+'''
 top200 = getclean_top200()
 # Length of the window - in hours
 window = 12
@@ -109,9 +125,16 @@ period = 21
 periodend = 0
 # what columns should the analysis happen over
 column = 'price_btc'
-df = avgrnkba(column,window,period,periodend)
-df2 = avgrnkba(column,6,7,0)
-df3 = avgrnkba(column,3,3,0)
+df = avgrnkba(top200,column,window,period,periodend)
+df2 = avgrnkba(top200,column,6,7,0)
+df3 = avgrnkba(top200,column,3,3,0)
+df4 = avgrnkba(top200,column,2,1,0)
+
+df.iloc[-40:].to_csv('win12h-period21d.csv')
+df2.iloc[-40:].to_csv('win6h-period7d.csv')
+df3.iloc[-40:].to_csv('win3h-period3d.csv')
+
+topNcompare(df2,df3,'mean',40)
 
 df3top40 = df3.iloc[-40:]
 dftop40 = df.iloc[-40:]
@@ -120,7 +143,7 @@ top403days = df3top40[df3top40.index.isin(dftop40.index)]
 top40both21 = top4021days[top4021days.index.isin(top403days.index)]
 top40both3 = top407days[top407days.index.isin(top4021days.index)]
 # Obtain the average for a windowed 7hr period over a week, windowing this every day. Re
-
+'''
 
 #Graveyard
 '''
