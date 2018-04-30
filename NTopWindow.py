@@ -6,8 +6,7 @@ import getdata
 import mungeData
 from multiprocessing import Process, Queue
 import StoreDF
-from datetime import datetime, timedelta, time
-
+import datetime
 
 hrs = [1, 6, 12, 24]
 periods = [2, 4, 8, 16, 24]
@@ -52,12 +51,12 @@ tablelist = StoreDF.get_last_update('cmcdataset')
 
 def get_data_range(tablelist,winper,perend,column):
     [window, period, periodend] = mungeData.conv_win_2_block(0, winper, perend)
-    lastupdate = datetime.strptime(max(tablelist.last_updated),"%Y-%m-%d %H:%M")
+    lastupdate = datetime.datetime.strptime(max(tablelist.last_updated),"%Y-%m-%d %H:%M")
     if periodend == 0:
         enddate = lastupdate
     else:
-        enddate = lastupdate - timedelta(minutes = 5*periodend)
-    startdate = enddate - timedelta(minutes = 5*period)
+        enddate = lastupdate - datetime.timedelta(minutes = 5*periodend)
+    startdate = enddate - datetime.timedelta(minutes = 5*period)
     store = StoreDF.select_HDFstore('cmcdataset')
     syms = tablelist.index
     mktcap = []
@@ -65,7 +64,7 @@ def get_data_range(tablelist,winper,perend,column):
     for sym in syms:
         symdata = store.get(sym)
         symdata = symdata.loc[~symdata.index.duplicated(keep='first')]
-        lastsymupdate = datetime.strptime(tablelist.loc[sym][0],"%Y-%m-%d %H:%M")
+        lastsymupdate = datetime.datetime.strptime(tablelist.loc[sym][0],"%Y-%m-%d %H:%M")
         if lastsymupdate > startdate:
             if lastsymupdate < enddate:
                 end = lastsymupdate
@@ -123,10 +122,10 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
     # Every day at 6pm perform the rolling window calculations on the price dataframe and spit out the top40
     firstentry = daystop200df.index[0]
     # Get firstentry after the longest rolling window
-    fearw = firstentry + timedelta(days = winX)
+    fearw = firstentry + datetime.timedelta(days = winX)
     # find the first 6pm:
-    t1 = time(hour=18, minute=5)
-    t2 = time(hour=17, minute=58)
+    t1 = datetime.time(hour=18, minute=5)
+    t2 = datetime.time(hour=17, minute=58)
     df = daystop200df.loc[daystop200df.index.time < t1]
     df2 = df.loc[df.index.time > t2]
     times = df2.loc[df2.index > fearw].index
@@ -143,20 +142,91 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
         winYmrank.append(mrankdfY)
         winYsrank.append(srankdfY)
     winXmrankdf = pd.concat(winXmrank,axis=1)
-    winXmrankdf.columns = times.strftime("%Y-%m-%d %H:00")
+    winXmrankdf.columns = times.strftime("%Y-%m-%d %H:%M")
     winXsrankdf = pd.concat(winXsrank, axis=1)
-    winXsrankdf.columns = times.strftime("%Y-%m-%d %H:00")
+    winXsrankdf.columns = times.strftime("%Y-%m-%d %H:%M")
     winYmrankdf = pd.concat(winYmrank, axis=1)
-    winYmrankdf.columns = times.strftime("%Y-%m-%d %H:00")
+    winYmrankdf.columns = times.strftime("%Y-%m-%d %H:%M")
     winYsrankdf = pd.concat(winYsrank, axis=1)
-    winYsrankdf.columns = times.strftime("%Y-%m-%d %H:00")
+    winYsrankdf.columns = times.strftime("%Y-%m-%d %H:%M")
+    cols = winXmrankdf.columns
+    topNcom = []
+    for col in cols:
+        topNboth = topNcompind(winXmrankdf[col], winYmrankdf[col], N)
+        topNcom.append(topNboth)
+    topN = pd.concat(topNcom,axis=1)
+    topN.columns = times.strftime("%Y-%m-%d %H:%M")
+    cols = topN.columns
+    topNshare = []
+    for i in range(0,len(cols)-1):
+        topNboth = topNcompsym(topN[cols[i+1]], topN[cols[i]]).reset_index(drop=True)
+        topNshare.append(topNboth)
+    topNcarried = pd.concat(topNshare,axis=1)
+    return topNshare, topNcarried
 
-    return
+def topNbuysell(topN,pbtc):
+    #goes through the topN, determines which ones are new to the list (to be bought) and which ones have been removed (to be sold)
+    times = topN.columns
+    symsprices = []
+    buytx = []
+    selltx = pd.DataFrame()
+    wallet = pd.DataFrame()
+    for i in range(0,len(times)):
+        walletsyms = wallet.index
+        thissyms = topN[times[i]].dropna()
+        buysyms = thissyms[~thissyms.isin(walletsyms)]
+        sellsyms = walletsyms[~walletsyms.isin(thissyms)]
+        buyprices = pbtc[buysyms].loc[times[i]]
+        sellprices = pbtc[sellsyms].loc[times[i]]
+        buydf = pd.DataFrame(buyprices)
+        buytx.append(buydf)
+        buydf.columns = ['buy_price']
+        buydf['buy_time'] = times[i]
+        wallet = wallet.append(buydf)
+        selldf = pd.DataFrame(sellprices)
+        selldf.columns = ['sell_price']
+        selldf['sell_time'] = times[i]
+        prevbuyprices = wallet[['buy_price','buy_time']].loc[sellsyms]
+        selldf = selldf.join(prevbuyprices)
+        selldf['profit%'] = (selldf['sell_price'] - selldf['buy_price']).divide(selldf['buy_price'])
+        selltx = selltx.append(selldf)
+        wallet = wallet.drop(sellsyms)
+        currentprices = pbtc[wallet.index].loc[times[i]]
+        wallet['current_price'] = currentprices
+        wallet['profit%'] = (wallet['current_price'] - wallet['buy_price']).divide(wallet['buy_price'])
+    return buytx, wallet, selltx
+
+
+
+
+
+
+    symsbtc = pd.concat(symsprices,axis=1)
+
+
+
+
+def topNcompind(dfX,dfY,N):
+    if N != 0:
+        df1 = dfX.sort_values(ascending=False).dropna()
+        df2 = dfY.sort_values(ascending=False).dropna()
+        df1 = df1.iloc[-N:]
+        df2 = df2.iloc[-N:]
+    topNboth1 = df1[df1.index.isin(df2.index)]
+    topNboth2 = df2[df2.index.isin(df1.index)]
+    topNboth = pd.DataFrame(topNboth1[topNboth1.index.isin(topNboth2.index)].index.tolist())
+    return topNboth
+
+def topNcompsym(df1,df2):
+    topNboth1 = df1[df1.isin(df2)]
+    topNboth2 = df2[df2.isin(df1)]
+    topNboth = pd.DataFrame(topNboth1[topNboth1.isin(topNboth2)])
+    return topNboth
 
 def rankattime(endtime, winX, hrX, pbtc):
-    starttime = endtime - timedelta(days=winX)
+    starttime = endtime - datetime.timedelta(days=winX)
     windata = pbtc[starttime:endtime]
-    windata = windata[daystop200df.loc[endtime].values]
+    windata = windata[daystop200df.loc[endtime].dropna().values]
     [mrankdf, srankdf] = rolling_avg(windata, hrX)
     return mrankdf, srankdf
 
@@ -170,9 +240,13 @@ def rolling_avg(pbtc,hrX):
     srankdf = rankdf.std().rename('std')
     return mrankdf, srankdf
 
-
-
-
+window = 28
+perend = 0
+winX = 15
+hrX = 6
+winY = 5
+hrY = 3
+N = 40
 per = 5
 perend = 0
 column = 'price_btc'
