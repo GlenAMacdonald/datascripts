@@ -119,13 +119,13 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
         dtop200 = mcp.loc[i].dropna().sort_values().iloc[-199:].index
         daystop200.append(dtop200)
     daystop200df = pd.DataFrame(daystop200,index=mcp.index)
-    # Every day at 6pm perform the rolling window calculations on the price dataframe and spit out the top40
+    # Every day at 6pm(PST)/1pm(UTC) perform the rolling window calcs on the price dataframe and return the top40
     firstentry = daystop200df.index[0]
     # Get firstentry after the longest rolling window
     fearw = firstentry + datetime.timedelta(days = winX)
     # find the first 6pm:
-    t1 = datetime.time(hour=18, minute=5)
-    t2 = datetime.time(hour=17, minute=58)
+    t1 = datetime.time(hour=1, minute=5)
+    t2 = datetime.time(hour=0, minute=58)
     df = daystop200df.loc[daystop200df.index.time < t1]
     df2 = df.loc[df.index.time > t2]
     times = df2.loc[df2.index > fearw].index
@@ -162,7 +162,8 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
         topNboth = topNcompsym(topN[cols[i+1]], topN[cols[i]]).reset_index(drop=True)
         topNshare.append(topNboth)
     topNcarried = pd.concat(topNshare,axis=1)
-    return topNshare, topNcarried
+    [buytx, wallet, selltx] = topNbuysell(topN, pbtc)
+    return topNshare, topNcarried, buytx, wallet, selltx
 
 def topNbuysell(topN,pbtc):
     #goes through the topN, determines which ones are new to the list (to be bought) and which ones have been removed (to be sold)
@@ -195,15 +196,6 @@ def topNbuysell(topN,pbtc):
         wallet['current_price'] = currentprices
         wallet['profit%'] = (wallet['current_price'] - wallet['buy_price']).divide(wallet['buy_price'])
     return buytx, wallet, selltx
-
-
-
-
-
-
-    symsbtc = pd.concat(symsprices,axis=1)
-
-
 
 
 def topNcompind(dfX,dfY,N):
@@ -250,3 +242,7 @@ N = 40
 per = 5
 perend = 0
 column = 'price_btc'
+
+[topNshare, topNcarried, buytx, wallet, selltx] = rollingtopN(window, perend, winX, hrX, winY, hrY, column, N)
+print 'total returns in wallet % ', sum(wallet['profit%'])
+print 'total returns % ', sum(selltx['profit%'].dropna())
