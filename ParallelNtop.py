@@ -12,44 +12,26 @@ import copy
 import itertools
 import multiprocessing
 
-hrs = [1, 6, 12, 24]
-periods = [2, 4, 8, 16, 24]
-periodend = 0
-column = 'price_btc'
+# ParallelNtop aims to be the parallelized version of NTopWindow
+# It loads the entire HDF5 data store into memory and uses it instead of relying on the HDD store
+# This is to allow multiprocessing to occur without race access conditions - couldn't think of an easier way to do so.
 
-#This function TrialHrsSym checks to see
-def TrialHrsSym(hrs,periods,periodend,column):
-    mean = []
-    std = []
-    chg = []
-    for window in hrs:
-        df = mungeData.avgrnkba(column, window, periods[1], periodend)
-        mean.append(pd.DataFrame(df['mean']))
-        std.append(pd.DataFrame(df['std']))
-        chg.append(pd.DataFrame(df['%chg']))
-    mean = pd.concat(mean, axis=1)
-    std = pd.concat(std, axis=1)
-    chg = pd.concat(chg, axis=1)
-    mean.columns = hrs
-    std.columns = hrs
-    chg.columns= hrs
-    p4t40 = []
-    for hr in hrs:
-        p4t40.append(pd.DataFrame(mean.sort_values(by=hr).index[:40]))
-    p4top40 = pd.concat(p4t40, axis=1)
-    p4top40.columns = hrs
-    return
+def load_data_into_mem():
+    store = StoreDF.select_HDFstore('cmcdataset')
+    tablelist = StoreDF.get_tlisth5('cmcdataset')
+    coindatalist = []
+    for sym in tablelist.index:
+        df = store.get(sym)
+        # remove duplicates
+        df = df.loc[~df.index.duplicated(keep='first')]
+        # cut off any 1min data
+        FiveMinStart = datetime.datetime(year=2018,month=03,day=17,hour=22,minute=51)
+        df = df.loc[FiveMinStart:]
+        coindatalist.append(df)
+    cmcdf = pd.concat(coindatalist, keys=tablelist.index)
+    return cmcdf
 
-def topNwindow(top200, winCol,rankCol,N):
-    # winCol = data column over which the windowing occurs, rankCol = data summary column over which the ranking occurs.
-    # mungeData.avgrnkba(column, win, per, perend) - perend defines the end of the period
-    df1 = mungeData.avgrnkba(winCol, 6, 7, 0)
-    df2 = mungeData.avgrnkba(winCol, 3, 3, 0)
-    topn = mungeData.topNcompare(df1,df2,rankCol,N)
-    return topn
-
-
-def get_data_range(tablelist,winper,perend,column):
+def get_data_range(cmcdf,winper,perend,column):
     [window, period, periodend] = mungeData.conv_win_2_block(0, winper, perend)
     lastupdate = datetime.datetime.strptime(max(tablelist.last_updated),"%Y-%m-%d %H:%M")
     if periodend == 0:
@@ -129,28 +111,6 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N1,N2,t):
     df = daystop200df.loc[daystop200df.index.time <= t1]
     df2 = df.loc[df.index.time >= t2]
     times = df2.loc[df2.index >= fearw].index
-    # find all entries @ 6am PST / 1pm UTC:
-    '''t3 = datetime.time(hour=13, minute=8)
-    t4 = datetime.time(hour=13, minute=2)
-    df3 = daystop200df.loc[daystop200df.index.time < t3]
-    df4 = df3.loc[df3.index.time > t4]
-    # find all entries @ 12pm PST / 7am UTC:
-    times2 = df4.loc[df4.index > fearw].index
-    times = times1.append(times2).sort_values()
-    t5 = datetime.time(hour=07, minute=15)
-    t6 = datetime.time(hour=07, minute=8)
-    df5 = daystop200df.loc[daystop200df.index.time < t5]
-    df6 = df5.loc[df5.index.time > t6]
-    # find all entries @ 12am PST / 7pm UTC:
-    times3 = df6.loc[df6.index > fearw].index
-    #times = times1.append(times2.append(times3)).sort_values()
-    t7 = datetime.time(hour=19, minute=5)
-    t8 = datetime.time(hour=18, minute=58)
-    df7 = daystop200df.loc[daystop200df.index.time < t7]
-    df8 = df7.loc[df7.index.time > t8]
-    times4 = df8.loc[df8.index > fearw].index
-    times = times1.append(times2.append(times3.append(times4))).sort_values()'''
-    # perform calcs on winX and winY
     winXmrank = []
     winXsrank = []
     winYmrank = []
@@ -449,7 +409,7 @@ column = 'price_btc'
 times = [datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0)]
 window = [20]
 perend = [0]
-winX = [10,12]
+winX = [4,6,8,10,12]
 hrX = [4,8,12,16,24]
 winY = [2,3]
 hrY = [4,8,12,16,24]
@@ -461,7 +421,7 @@ N2 = [1,2]
 ResultFrame = pd.DataFrame(columns = ['window','perend','winX','hrX','winY','hrY','N1','N2','period%return','SR','KC','AvgRPD'])
 #ResultFrame.to_csv(filename)
 
-i=1501
+i=0
 for win in window:
     for pend in perend:
         for wX in winX:
