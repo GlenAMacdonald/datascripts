@@ -5,10 +5,21 @@ import coinmarketcap as cmc
 import sys
 sys.path.extend(['/home/Spare/CC/datascripts'])
 import getdata
+import Queue
+import threading
 
 datasetname = 'cmcdataset'
 market = cmc.Market()
 
+'''
+#Initiate dataset
+top400 = identify_top400()
+data = init_dl_top400(top400)
+init_dset(datasetname, data)
+
+
+
+'''
 def select_HDFstore(datasetname):
     store = pd.HDFStore('/home/Spare/CC/data/{}.h5'.format(datasetname))
     return store
@@ -37,10 +48,51 @@ def identify_top200():
     top200 = pd.concat([df1,df2],ignore_index=True)
     return top200
 
+def identify_top400():
+    df1 = pd.DataFrame(market.ticker('?start=0&limit=99'))
+    df2 = pd.DataFrame(market.ticker('?start=100&limit=199'))
+    df3 = pd.DataFrame(market.ticker('?start=200&limit=299'))
+    df4 = pd.DataFrame(market.ticker('?start=300&limit=399'))
+    top400 = pd.concat([df1,df2,df3,df4],ignore_index=True)
+    return top400
+
+def init_dl_top400(top400):
+    syms = top400.symbol.tolist()
+    tablelist = getdata.get_table_list(getdata.bqc,getdata.job_config)
+    data = getdata.get_many_syms(syms, tablelist, getdata.bqc, getdata.job_config)
+    data.columns = data.columns.astype(str)
+    data.index.set_levels(data.index.levels[0].astype(str), level=0, inplace=True)
+    return data
+
+def init_dl_top400_2(top400):
+    syms = top400.symbol.tolist()
+    tablelist = getdata.get_table_list(getdata.bqc, getdata.job_config)
+    store = select_HDFstore(datasetname)
+    symq = Queue.Queue()
+    qout= Queue.Queue()
+    numthreads = 20
+    threads = []
+    for sym in syms:
+        symq.put((sym))
+    for i in range(numthreads):
+        t = threading.Thread(target=getdata.get_sym_loop, args=(symq, qout, tablelist, getdata.bqc, getdata.job_config))
+        threads.append(t)
+    for i in threads:
+        i.start()
+    for i in threads:
+        i.join()
+    for i in range(qout.qsize()):
+        [df, sym] = qout.get()
+        store.put(sym, df, format='table', append=True)
+    store.close()
+    return
+
+
+
 def init_dl_top200(top200):
     syms = top200.symbol.tolist()
     tablelist = getdata.get_table_list(getdata.bqc,getdata.job_config)
-    data = getdata.get_many_syms(syms, tablelist, getdata.bqc, getdata.job_config, 'all')
+    data = getdata.get_many_syms(syms, tablelist, getdata.bqc, getdata.job_config)
     data.columns = data.columns.astype(str)
     data.index.set_levels(data.index.levels[0].astype(str), level=0, inplace=True)
     return data
@@ -115,6 +167,14 @@ def update_top200(datasetname):
         store.append(sym,df,format='table')
     store.close()
     ud_dset_tlist(datasetname)
+    return
+
+def get_sym(sym):
+    store = select_HDFstore(datasetname)
+    tablelist = getdata.get_table_list(getdata.bqc, getdata.job_config)
+    newdf = getdata.get_sym(sym, tablelist, getdata.bqc, getdata.job_config)
+    store.put(sym, newdf, format='table')
+    store.close()
     return
 
 def restore_tlisth5(datasetname):

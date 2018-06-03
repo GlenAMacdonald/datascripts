@@ -54,8 +54,8 @@ def rolling_EEMD(sym,column,win,per,perend):
 
 sym = 'BTC'
 column = 'price_usd'
-win = 0.5
-per = 3.5
+win = 0.1
+per = 1.0
 perend = 0
 datablock = get_data_for_EEMD(sym,column,per,perend)
 

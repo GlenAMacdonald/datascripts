@@ -7,6 +7,10 @@ import mungeData
 from multiprocessing import Process, Queue
 import StoreDF
 import datetime
+import numpy as np
+import copy
+import itertools
+import multiprocessing
 
 hrs = [1, 6, 12, 24]
 periods = [2, 4, 8, 16, 24]
@@ -44,10 +48,6 @@ def topNwindow(top200, winCol,rankCol,N):
     topn = mungeData.topNcompare(df1,df2,rankCol,N)
     return topn
 
-per = 2
-perend = 0
-column = 'price_btc'
-tablelist = StoreDF.get_last_update('cmcdataset')
 
 def get_data_range(tablelist,winper,perend,column):
     [window, period, periodend] = mungeData.conv_win_2_block(0, winper, perend)
@@ -84,7 +84,7 @@ def get_data_range(tablelist,winper,perend,column):
     ocol = pd.concat(othercol,axis=1)
     return mcp,ocol
 
-def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
+def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N1,N2,t):
     #extra day for the 6pm daily re-shuffle
     window = window + 1
     ## window = n days over which the analysis takes place,
@@ -94,7 +94,6 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
     ## hrY = n hours, hourly interval over which the rolling average window for winY occurs
     ## column = dataset column used for the analysis, generally 'price_btc' or 'price_usd'
     ## N = topN
-
     # Re-arrange winX and winY so that winX is larger than winY
     '''if winX < winY:
         temp = winX
@@ -111,7 +110,6 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
     # See's which currencies are shared over both sets,
     # Removes the top 3 (usually bogus data or stupid coins) and records the symbols and dates.
     # Relies on another function to give prices for the 'buys' and 'sells'
-
     tablelist = StoreDF.get_tlisth5('cmcdataset')
     [mcp, pbtc] = get_data_range(tablelist, window, perend, column)
     daystop200 = []
@@ -123,12 +121,35 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
     firstentry = daystop200df.index[0]
     # Get firstentry after the longest rolling window
     fearw = firstentry + datetime.timedelta(days = winX)
-    # find the first 6pm:
-    t1 = datetime.time(hour=1, minute=5)
-    t2 = datetime.time(hour=0, minute=58)
-    df = daystop200df.loc[daystop200df.index.time < t1]
-    df2 = df.loc[df.index.time > t2]
-    times = df2.loc[df2.index > fearw].index
+    # find all entries @ +/- 2 min from the specificed time,
+    # Note: 18:00 PST = 01:00 UTC:
+    tmargin = datetime.timedelta(minutes=2)
+    t1 = (t + tmargin).time()
+    t2 = (t - tmargin).time()
+    df = daystop200df.loc[daystop200df.index.time <= t1]
+    df2 = df.loc[df.index.time >= t2]
+    times = df2.loc[df2.index >= fearw].index
+    # find all entries @ 6am PST / 1pm UTC:
+    '''t3 = datetime.time(hour=13, minute=8)
+    t4 = datetime.time(hour=13, minute=2)
+    df3 = daystop200df.loc[daystop200df.index.time < t3]
+    df4 = df3.loc[df3.index.time > t4]
+    # find all entries @ 12pm PST / 7am UTC:
+    times2 = df4.loc[df4.index > fearw].index
+    times = times1.append(times2).sort_values()
+    t5 = datetime.time(hour=07, minute=15)
+    t6 = datetime.time(hour=07, minute=8)
+    df5 = daystop200df.loc[daystop200df.index.time < t5]
+    df6 = df5.loc[df5.index.time > t6]
+    # find all entries @ 12am PST / 7pm UTC:
+    times3 = df6.loc[df6.index > fearw].index
+    #times = times1.append(times2.append(times3)).sort_values()
+    t7 = datetime.time(hour=19, minute=5)
+    t8 = datetime.time(hour=18, minute=58)
+    df7 = daystop200df.loc[daystop200df.index.time < t7]
+    df8 = df7.loc[df7.index.time > t8]
+    times4 = df8.loc[df8.index > fearw].index
+    times = times1.append(times2.append(times3.append(times4))).sort_values()'''
     # perform calcs on winX and winY
     winXmrank = []
     winXsrank = []
@@ -152,7 +173,7 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N):
     cols = winXmrankdf.columns
     topNcom = []
     for col in cols:
-        topNboth = topNcompind(winXmrankdf[col], winYmrankdf[col], N)
+        topNboth = topNNcompind(winXmrankdf[col], winYmrankdf[col], N1,N2)
         topNcom.append(topNboth)
     topN = pd.concat(topNcom,axis=1)
     topN.columns = times.strftime("%Y-%m-%d %H:%M")
@@ -207,6 +228,34 @@ def topNcompind(dfX,dfY,N):
     topNboth1 = df1[df1.index.isin(df2.index)]
     topNboth2 = df2[df2.index.isin(df1.index)]
     topNboth = pd.DataFrame(topNboth1[topNboth1.index.isin(topNboth2.index)].index.tolist())
+    if topNboth.empty:
+        topNboth = pd.DataFrame({'0':[np.nan]})
+    return topNboth
+
+def topNNcompind(dfX,dfY,N1,N2):
+    if N2 != 0:
+        df1 = dfX.sort_values(ascending=False).dropna()
+        df2 = dfY.sort_values(ascending=False).dropna()
+        df1 = df1.iloc[-N1:-N2]
+        df2 = df2.iloc[-N1:-N2]
+    topNboth1 = df1[df1.index.isin(df2.index)]
+    topNboth2 = df2[df2.index.isin(df1.index)]
+    topNboth = pd.DataFrame(topNboth1[topNboth1.index.isin(topNboth2.index)].index.tolist())
+    if topNboth.empty:
+        topNboth = pd.DataFrame({'0':[np.nan]})
+    return topNboth
+
+def topNNcompindSortstd(dfX,dfY,N1,N2):
+    if N2 != 0:
+        df1 = dfX.sort_values(ascending=False).dropna()
+        df2 = dfY.sort_values(ascending=False).dropna()
+        df1 = df1.iloc[-N1:-N2]
+        df2 = df2.iloc[-N1:-N2]
+    topNboth1 = df1[df1.index.isin(df2.index)]
+    topNboth2 = df2[df2.index.isin(df1.index)]
+    topNboth = pd.DataFrame(topNboth1[topNboth1.index.isin(topNboth2.index)].index.tolist())
+    if topNboth.empty:
+        topNboth = pd.DataFrame({'0':[np.nan]})
     return topNboth
 
 def topNcompsym(df1,df2):
@@ -218,7 +267,6 @@ def topNcompsym(df1,df2):
 def rankattime(endtime, winX, hrX, pbtc):
     starttime = endtime - datetime.timedelta(days=winX)
     windata = pbtc[starttime:endtime]
-    windata = windata[daystop200df.loc[endtime].dropna().values]
     [mrankdf, srankdf] = rolling_avg(windata, hrX)
     return mrankdf, srankdf
 
@@ -232,17 +280,214 @@ def rolling_avg(pbtc,hrX):
     srankdf = rankdf.std().rename('std')
     return mrankdf, srankdf
 
-window = 28
-perend = 0
-winX = 15
-hrX = 6
-winY = 5
-hrY = 3
-N = 40
-per = 5
-perend = 0
-column = 'price_btc'
+def runtestold(window, perend, winX, hrX, winY, hrY, column, N1, N2):
+    [topNshare, topNcarried, buytx, wallet, selltx] = rollingtopN(window, perend, winX, hrX, winY, hrY, column, N1, N2)
+    # print 'total returns in wallet % ', sum(wallet['profit%'].dropna())
+    # print 'total returns % ', sum(selltx['profit%'].dropna())
+    selltxnona = selltx.dropna()
+    buys = selltxnona.groupby(selltxnona.buy_time).count().buy_price
+    [avgbuys, maxbuys, minbuys] = [buys.mean(), buys.max(), buys.min()]
+    [avgret, maxret, minret] = [selltxnona['profit%'].mean().round(3),selltxnona['profit%'].max().round(3), selltxnona['profit%'].min().round(3)]
+    sellbyday = selltxnona.set_index(['buy_time'])
+    dailysell = []
+    for ind in sellbyday.index.unique():
+        daysell = sellbyday.loc[ind]['profit%'].mean()
+        dailysell.append(daysell)
+    avgdailyret = round(np.mean(dailysell), 3)
+    notxprofit = 1
+    for i in dailysell:
+        notxprofit = notxprofit * (1 + i)
 
-[topNshare, topNcarried, buytx, wallet, selltx] = rollingtopN(window, perend, winX, hrX, winY, hrY, column, N)
-print 'total returns in wallet % ', sum(wallet['profit%'])
-print 'total returns % ', sum(selltx['profit%'].dropna())
+    print 'Avg # Trans', round(avgbuys,2), '| Max # Trans', maxbuys, '| Min # Trans', minbuys
+    print 'Period Return (%)', (round(notxprofit,3)-1)*100, '| Avg Return (%) / Day', \
+        (avgdailyret)*100, '| Avg Return (%) / Trans', avgret*100, '| Max Return (%) / Trans', \
+        (maxret)*100, '| Min Return (%) / Trans', (minret)*100
+    return wallet, selltx
+
+def cleanselltx(selltx):
+    #stop gap resource to get rid of NA entries from the selltx record - really need to identify and fix the root cause
+    selltx = selltx[~selltx['sell_price'].isnull()]
+    selltx = selltx[~selltx['buy_price'].isnull()]
+    return selltx
+
+def sells(selltx):
+    #only works for one shuffle per day
+    if len(selltx) > 0:
+        selltx = cleanselltx(selltx)
+        selltxstart = selltx.buy_time.iloc[0]
+        selltxend = selltx.sell_time.iloc[-1]
+        sellperiod = (datetime.datetime.strptime(selltxend,"%Y-%m-%d %H:%M") - datetime.datetime.strptime(selltxstart,"%Y-%m-%d %H:%M")).days
+        buys = pd.DataFrame({'buy_price':selltx.buy_price,'buy_time':selltx.buy_time,'sym':selltx.index}).set_index('buy_time')
+        buys.index = pd.to_datetime(buys.index).date
+        sells = pd.DataFrame({'sell_price':selltx.sell_price,'sell_time':selltx.sell_time,'sym':selltx.index}).set_index('sell_time')
+        sells.index = pd.to_datetime(sells.index).date
+        dailystats = pd.DataFrame(columns = ['numbuys','numsells','RPD','balance','AvgRPT','returns'],index = pd.date_range(start=selltxstart,periods=sellperiod+2).date)
+        wallet = pd.DataFrame(columns = ['sym','qty','buy_price'])
+        cashbalance = 1.0
+        pastbalance = 1.0
+        balance = 1.0
+        for day, row in dailystats.iterrows():
+            try:
+                pastbalance = dailystats.loc[day-datetime.timedelta(days=1)].balance
+                balance = copy.deepcopy(pastbalance)
+                dayssells = sells.loc[[day]]
+                dailystats.loc[day].numsells = len(dayssells)
+                RPT = []
+                for index, row in dayssells.iterrows():
+                    ret = wallet[wallet.sym == row.sym].qty.iloc[0]*row.sell_price
+                    cashbalance = cashbalance + ret
+                    RPT.append((row.sell_price/(wallet[wallet.sym == row.sym].buy_price.iloc[0])-1))
+                    wallet = wallet[wallet.sym != row.sym]
+                dailystats.loc[day].AvgRPT = np.mean(RPT)
+                dailystats.loc[day].returns = RPT
+            except:
+                dailystats.loc[day].numsells = 0
+                dailystats.loc[day].AvgRPT = 0
+                dailystats.loc[day].RPD = 0
+                dailystats.loc[day].balance = balance
+                dailystats.loc[day].returns = [0]
+            try:
+                daysbuys = buys.loc[[day]]
+                numbuys = len(daysbuys)
+                dailystats.loc[day].numbuys = numbuys
+                btcperbuy = cashbalance/numbuys
+                for index, row in daysbuys.iterrows():
+                    wallet = wallet.append(pd.DataFrame({'sym':[row.sym],'qty':[btcperbuy/row.buy_price],'buy_price':[row.buy_price]}),ignore_index=True)
+                    cashbalance = cashbalance - btcperbuy
+                walletbalance = 0
+                for index, row in wallet.iterrows():
+                    walletbalance = walletbalance + row.buy_price*row.qty
+                balance = cashbalance + walletbalance
+                dailystats.loc[day].RPD = balance / pastbalance - 1
+                dailystats.loc[day].balance = balance
+            except:
+                dailystats.loc[day].numbuys = 0
+                walletbalance = 0
+                for index, row in wallet.iterrows():
+                    walletbalance = walletbalance + row.buy_price*row.qty
+                balance = cashbalance + walletbalance
+                dailystats.loc[day].RPD = balance / pastbalance - 1
+                dailystats.loc[day].balance = balance
+    else:
+        dailystats = pd.DataFrame({'numbuys':0,'numsells':0,'RPD':0,'balance':1.0,'AvgRPT':0,'returns':0},index = [0])
+    return dailystats
+
+def runtest(window, perend, winX, hrX, winY, hrY, column, N1, N2, t, p):
+    [topNshare, topNcarried, buytx, wallet, selltx] = rollingtopN(window, perend, winX, hrX, winY, hrY, column, N1, N2, t)
+    dailystats = sells(selltx)
+    if dailystats.index[0] != 0:
+        #convert the returns to a flat list
+        periodreturn = (round(dailystats.balance[-1],3)-1)*100
+        returns = dailystats.returns.copy().dropna().values.tolist()
+        returns = list(itertools.chain.from_iterable(returns))
+        wins = float(sum(i > 0 for i in returns))
+        losses = float(sum(i < 0 for i in returns))
+        winloss = wins+losses
+        if winloss != 0:
+            winprob = wins/(wins+losses)
+        else:
+            winprob = 0
+        AvgTrans = round(np.mean([dailystats.numbuys[:-1], dailystats.numsells[1:]]), 2)
+        AvgRPT = round(np.mean(returns[1:]),2)
+        AvgRPD = np.mean(dailystats.RPD[1:]) * 100
+        StdRPD = np.std(dailystats.RPD[1:]) * 100
+        #Sharpe Ratio calculated on the daily returns
+        SR = round(np.sqrt(31)*AvgRPD/StdRPD,4)
+        try:
+            KC = round(winprob-(1-winprob)/(wins/losses),4)
+        except:
+            KC = 0
+        results = [SR, KC, round(periodreturn,3), AvgTrans, round(AvgRPD,2)]
+        if p:
+            print 'Avg # Trans', AvgTrans, '| Max # Buys', max(dailystats.numbuys[:-1]), '| Min # Buys',min(dailystats.numbuys[:-1])
+            print 'Period Return (%)', periodreturn, '| Avg Return (%) / Day', round(AvgRPD,2), \
+                '| Avg Return (%) / Trans', AvgRPT
+            print 'Kelly Crit ', KC, '| Sharpe Ratio ', SR
+    else:
+        print 'No Transactions'
+        results = [0,0,0,0,0]
+    return wallet, selltx, dailystats, results
+
+def runone(win,pend,wX,hX,wY,hY,n1,n2,t,qout,filename):
+    print wX, hX, wY, hY, n1, n2
+    [wallet, selltx, dailystats, results] = runtest(window=win, perend=pend, winX=wX, hrX=hX,
+                                                    winY=wY, hrY=hY, column='price_btc', N1=n1,
+                                                    N2=n2, t=t, p=False)
+    [SR, KC, periodreturn, AvgTrans, AvgRPD] = [results[0], results[1], results[2], results[3], results[4]]
+    RF = pd.DataFrame(
+        {'AvgTrans': AvgTrans, 'window': win, 'perend': pend, 'winX': wX, 'hrX': hX, 'winY': wY, 'hrY': hY, 'N1': n1,
+         'N2': n2, 'period%return': periodreturn, 'SR': SR, 'KC': KC, 'AvgRPD': AvgRPD}, index=[i],
+        columns=['window', 'perend', 'winX', 'hrX', 'winY', 'hrY', 'N1', 'N2', 'period%return', 'SR', 'KC', 'AvgRPD',
+                 'AvgTrans'])
+    qout.put(RF)
+    with open(filename, 'a') as f:
+        RF.to_csv(f, header=False)
+    return
+
+
+window = 20
+perend = 0
+winX = 4
+hrX = 4
+winY = 2
+hrY = 4
+N1 = 13
+N2 = 1
+column = 'price_btc'
+t = datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0)
+p = True
+
+#runtest(window, perend, winX, hrX, winY, hrY, column, N1, N2)
+[wallet, selltx, dailystats, results] = runtest(window=window, perend=perend, winX=winX, hrX=hrX, winY=winY, hrY=hrY, column='price_btc', N1=N1, N2=N2, t=t, p=True)
+
+#[wallet, selltx] = runtestold(window=12, perend=1, winX=4, hrX=18, winY=1, hrY=4, column='price_btc', N1=9, N2=1)
+sum(selltx['profit%'][(selltx['profit%']>0).values])
+sum(selltx['profit%'][(selltx['profit%']<0).values])
+
+##----- Variable Script ---
+column = 'price_btc'
+times = [datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0)]
+window = [20]
+perend = [0]
+winX = [4,6,8,10,12]
+hrX = [4,8,12,16,24]
+winY = [2,3]
+hrY = [4,8,12,16,24]
+N1 = [5,8,11,15,20]
+N2 = [1,2]
+
+#now = datetime.datetime.now()
+#filename = 'ResultFrame{}.csv'.format(now)
+ResultFrame = pd.DataFrame(columns = ['window','perend','winX','hrX','winY','hrY','N1','N2','period%return','SR','KC','AvgRPD'])
+#ResultFrame.to_csv(filename)
+
+i=0
+for win in window:
+    for pend in perend:
+        for wX in winX:
+            for hX in hrX:
+                for wY in winY:
+                    for hY in hrY:
+                        for n1 in N1:
+                            for n2 in N2:
+                                for t in times:
+                                    i=i+1
+                                    print wX, hX, wY, hY, n1, n2
+                                    [wallet, selltx, dailystats, results] = runtest(window=win, perend=pend, winX=wX, hrX=hX,
+                                                                                winY=wY, hrY=hY, column='price_btc', N1=n1,
+                                                                                N2=n2, t=t, p=False)
+
+                                    [SR, KC, periodreturn, AvgTrans, AvgRPD] = [results[0],results[1],results[2],results[3],results[4]]
+                                    newrow = [win, pend, wX, hX, wY, hY, n1, n2, periodreturn, SR, KC, AvgRPD]
+                                    RF = pd.DataFrame({'AvgTrans':AvgTrans,'window':win,'perend':pend,'winX':wX,'hrX':hX,'winY':wY,'hrY':hY,'N1':n1,'N2':n2,'period%return':periodreturn,'SR':SR,'KC':KC,'AvgRPD':AvgRPD},index=[i],columns = ['window','perend','winX','hrX','winY','hrY','N1','N2','period%return','SR','KC','AvgRPD','AvgTrans'])
+                                    with open('mycsv.csv', 'a') as f:
+                                        RF.to_csv(f,header=False)
+                                    ResultFrame = ResultFrame.append(RF)[RF.columns.tolist()]
+
+results = pd.read_csv('mycsv.csv',index_col=0, names = ['window','perend','winX','hrX','winY','hrY','N1','N2','period%return','SR','KC','AvgRPD','AvgTrans'])
+nas = results[results['period%return'].isnull()]
+
+
+filename = 'ResultFrame{}.csv'.format(now)
+ResultFrame = pd.DataFrame(columns = ['window','perend','winX','hrX','winY','hrY','N1','N2','period%return','SR','KC','AvgRPD','AvgTrans'])
+ResultFrame.to_csv(filename)
