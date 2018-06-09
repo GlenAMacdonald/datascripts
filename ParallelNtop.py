@@ -29,22 +29,23 @@ def load_data_into_mem():
         df = df.loc[FiveMinStart:]
         coindatalist.append(df)
     cmcdf = pd.concat(coindatalist, keys=tablelist.index)
-    return cmcdf
+    return cmcdf, tablelist
 
-def get_data_range(cmcdf,winper,perend,column):
+def get_data_range(cmcdf,tablelist,winper,perend,column):
     [window, period, periodend] = mungeData.conv_win_2_block(0, winper, perend)
-    lastupdate = datetime.datetime.strptime(max(tablelist.last_updated),"%Y-%m-%d %H:%M")
+    lastupdate = datetime.datetime.strptime(min(tablelist.last_updated),"%Y-%m-%d %H:%M")
     if periodend == 0:
         enddate = lastupdate
     else:
         enddate = lastupdate - datetime.timedelta(minutes = 5*periodend)
     startdate = enddate - datetime.timedelta(minutes = 5*period)
-    store = StoreDF.select_HDFstore('cmcdataset')
+    # removed line
+    #store = StoreDF.select_HDFstore('cmcdataset')
     syms = tablelist.index
     mktcap = []
     othercol = []
     for sym in syms:
-        symdata = store.get(sym)
+        symdata = cmcdf.loc[sym]
         symdata = symdata.loc[~symdata.index.duplicated(keep='first')]
         lastsymupdate = datetime.datetime.strptime(tablelist.loc[sym][0],"%Y-%m-%d %H:%M")
         if lastsymupdate > startdate:
@@ -64,9 +65,9 @@ def get_data_range(cmcdf,winper,perend,column):
             othercol.append(coldata)
     mcp = pd.concat(mktcap,axis=1)
     ocol = pd.concat(othercol,axis=1)
-    return mcp,ocol
+    return mcp, ocol
 
-def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N1,N2,t):
+def rollingtopN(cmcdf, tablelist, window, perend, winX, hrX, winY, hrY, column, N1,N2,t):
     #extra day for the 6pm daily re-shuffle
     window = window + 1
     ## window = n days over which the analysis takes place,
@@ -92,8 +93,7 @@ def rollingtopN(window, perend, winX, hrX, winY, hrY, column, N1,N2,t):
     # See's which currencies are shared over both sets,
     # Removes the top 3 (usually bogus data or stupid coins) and records the symbols and dates.
     # Relies on another function to give prices for the 'buys' and 'sells'
-    tablelist = StoreDF.get_tlisth5('cmcdataset')
-    [mcp, pbtc] = get_data_range(tablelist, window, perend, column)
+    [mcp, pbtc] = get_data_range(cmcdf, tablelist, window, perend, column)
     daystop200 = []
     for i in mcp.index:
         dtop200 = mcp.loc[i].dropna().sort_values().iloc[-199:].index
@@ -240,30 +240,6 @@ def rolling_avg(pbtc,hrX):
     srankdf = rankdf.std().rename('std')
     return mrankdf, srankdf
 
-def runtestold(window, perend, winX, hrX, winY, hrY, column, N1, N2):
-    [topNshare, topNcarried, buytx, wallet, selltx] = rollingtopN(window, perend, winX, hrX, winY, hrY, column, N1, N2)
-    # print 'total returns in wallet % ', sum(wallet['profit%'].dropna())
-    # print 'total returns % ', sum(selltx['profit%'].dropna())
-    selltxnona = selltx.dropna()
-    buys = selltxnona.groupby(selltxnona.buy_time).count().buy_price
-    [avgbuys, maxbuys, minbuys] = [buys.mean(), buys.max(), buys.min()]
-    [avgret, maxret, minret] = [selltxnona['profit%'].mean().round(3),selltxnona['profit%'].max().round(3), selltxnona['profit%'].min().round(3)]
-    sellbyday = selltxnona.set_index(['buy_time'])
-    dailysell = []
-    for ind in sellbyday.index.unique():
-        daysell = sellbyday.loc[ind]['profit%'].mean()
-        dailysell.append(daysell)
-    avgdailyret = round(np.mean(dailysell), 3)
-    notxprofit = 1
-    for i in dailysell:
-        notxprofit = notxprofit * (1 + i)
-
-    print 'Avg # Trans', round(avgbuys,2), '| Max # Trans', maxbuys, '| Min # Trans', minbuys
-    print 'Period Return (%)', (round(notxprofit,3)-1)*100, '| Avg Return (%) / Day', \
-        (avgdailyret)*100, '| Avg Return (%) / Trans', avgret*100, '| Max Return (%) / Trans', \
-        (maxret)*100, '| Min Return (%) / Trans', (minret)*100
-    return wallet, selltx
-
 def cleanselltx(selltx):
     #stop gap resource to get rid of NA entries from the selltx record - really need to identify and fix the root cause
     selltx = selltx[~selltx['sell_price'].isnull()]
@@ -332,8 +308,8 @@ def sells(selltx):
         dailystats = pd.DataFrame({'numbuys':0,'numsells':0,'RPD':0,'balance':1.0,'AvgRPT':0,'returns':0},index = [0])
     return dailystats
 
-def runtest(window, perend, winX, hrX, winY, hrY, column, N1, N2, t, p):
-    [topNshare, topNcarried, buytx, wallet, selltx] = rollingtopN(window, perend, winX, hrX, winY, hrY, column, N1, N2, t)
+def runtest(cmcdf,tablelist,window, perend, winX, hrX, winY, hrY, column, N1, N2, t, p):
+    [topNshare, topNcarried, buytx, wallet, selltx] = rollingtopN(cmcdf,tablelist,window, perend, winX, hrX, winY, hrY, column, N1, N2, t)
     dailystats = sells(selltx)
     if dailystats.index[0] != 0:
         #convert the returns to a flat list
@@ -368,22 +344,87 @@ def runtest(window, perend, winX, hrX, winY, hrY, column, N1, N2, t, p):
         results = [0,0,0,0,0]
     return wallet, selltx, dailystats, results
 
-def runone(win,pend,wX,hX,wY,hY,n1,n2,t,qout,filename):
-    print wX, hX, wY, hY, n1, n2
-    [wallet, selltx, dailystats, results] = runtest(window=win, perend=pend, winX=wX, hrX=hX,
-                                                    winY=wY, hrY=hY, column='price_btc', N1=n1,
-                                                    N2=n2, t=t, p=False)
-    [SR, KC, periodreturn, AvgTrans, AvgRPD] = [results[0], results[1], results[2], results[3], results[4]]
-    RF = pd.DataFrame(
-        {'AvgTrans': AvgTrans, 'window': win, 'perend': pend, 'winX': wX, 'hrX': hX, 'winY': wY, 'hrY': hY, 'N1': n1,
-         'N2': n2, 'period%return': periodreturn, 'SR': SR, 'KC': KC, 'AvgRPD': AvgRPD}, index=[i],
-        columns=['window', 'perend', 'winX', 'hrX', 'winY', 'hrY', 'N1', 'N2', 'period%return', 'SR', 'KC', 'AvgRPD',
-                 'AvgTrans'])
-    qout.put(RF)
-    with open(filename, 'a') as f:
-        RF.to_csv(f, header=False)
+def createrunq(i, window, perend, winX, hrX, winY, hrY, N1, N2, times):
+    runq = multiprocessing.Queue()
+    for win in window:
+        for pend in perend:
+            for wX in winX:
+                for hX in hrX:
+                    for wY in winY:
+                        if wY >= wX:
+                            break
+                        for hY in hrY:
+                            for n1 in N1:
+                                for n2 in N2:
+                                    runq.put([i, win, pend, wX, hX, wY, hY, n1, n2, times])
+                                    i = i + 1
+    return runq
+
+def startloop(nthreads, runq, qout,cmcdf,tablelist):
+    plist = []
+    for n in range(nthreads):
+        p = multiprocessing.Process(target=runloop,args=(runq,qout,cmcdf.copy(),tablelist.copy()))
+        plist.append(p)
+    for p in plist:
+        p.start()
+    for p in plist:
+        p.join()
     return
 
+def runloop(runq,qout,cmcdf,tablelist):
+    while runq.qsize() > 0:
+        runtestoneManyTimes(runq,qout,cmcdf,tablelist)
+    return
+
+def runtestoneManyTimes(runq,qout,cmcdf,tablelist):
+    [i, win, pend, wX, hX, wY, hY, n1, n2, times] = runq.get()
+    print wX, hX, wY, hY, n1, n2
+    for t in times:
+        timestring = datetime.time.strftime(t.time(), format="%H:%M")
+        print wX, hX, wY, hY, n1, n2
+        [wallet, selltx, dailystats, results] = runtest(cmcdf=cmcdf, tablelist=tablelist, window=win, perend=pend, winX=wX,
+                                                        hrX=hX, winY=wY, hrY=hY, column='price_btc', N1=n1, N2=n2, t=t, p=False)
+        [SR, KC, periodreturn, AvgTrans, AvgRPD] = [results[0], results[1], results[2], results[3], results[4]]
+        #newrow = [win, pend, wX, hX, wY, hY, n1, n2, periodreturn, SR, KC, AvgRPD]
+        RF = pd.DataFrame(
+            {'AvgTrans': AvgTrans, 'window': win, 'perend': pend, 'winX': wX, 'hrX': hX, 'winY': wY, 'hrY': hY, 'N1': n1,
+             'N2': n2, 'period%return': periodreturn, 'SR': SR, 'KC': KC, 'AvgRPD': AvgRPD, 'time': timestring}, index=[i],
+             columns=['window', 'perend', 'winX', 'hrX', 'winY', 'hrY', 'N1', 'N2', 'period%return', 'SR', 'KC', 'AvgRPD',
+                     'AvgTrans','time'])
+        with open('mycsv.csv', 'a') as f:
+            RF.to_csv(f, header=False)
+        qout.put(RF)
+
+    return
+
+
+##----- Variable Script ---
+[cmcdf, tablelist] = load_data_into_mem()
+
+i=1
+column = 'price_btc'
+window = [12,30,60]
+perend = [0]
+winX = [4,6,8,10,12]
+hrX = [4,8,12,16,24]
+winY = [1,2,3,4,5,6]
+hrY = [4,8,12,16,24]
+N1 = [5,8,11,15,20]
+N2 = [1,2]
+times = [datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0),
+         datetime.datetime(year=1, month=1, day=1, hour=5, minute=0),
+         datetime.datetime(year=1, month=1, day=1, hour=9, minute=0),
+         datetime.datetime(year=1, month=1, day=1, hour=13, minute=0),
+         datetime.datetime(year=1, month=1, day=1, hour=17, minute=0),
+         datetime.datetime(year=1, month=1, day=1, hour=21, minute=0)]
+
+#multiple Thread
+nthreads = multiprocessing.cpu_count()
+runq = createrunq(i, window, perend, winX, hrX, winY, hrY, N1, N2, times)
+qout = multiprocessing.Queue()
+startloop(nthreads, runq, qout,cmcdf,tablelist)
+
+#Single Executable instance
 
 window = 20
 perend = 0
@@ -395,31 +436,16 @@ N1 = 13
 N2 = 1
 column = 'price_btc'
 t = datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0)
-p = True
 
+p = True
 #runtest(window, perend, winX, hrX, winY, hrY, column, N1, N2)
-[wallet, selltx, dailystats, results] = runtest(window=window, perend=perend, winX=winX, hrX=hrX, winY=winY, hrY=hrY, column='price_btc', N1=N1, N2=N2, t=t, p=True)
+[wallet, selltx, dailystats, results] = runtest(cmcdf = cmcdf, tablelist = tablelist, window=window, perend=perend, winX=winX, hrX=hrX, winY=winY, hrY=hrY, column='price_btc', N1=N1, N2=N2, t=t, p=True)
 
 #[wallet, selltx] = runtestold(window=12, perend=1, winX=4, hrX=18, winY=1, hrY=4, column='price_btc', N1=9, N2=1)
 sum(selltx['profit%'][(selltx['profit%']>0).values])
 sum(selltx['profit%'][(selltx['profit%']<0).values])
 
-##----- Variable Script ---
-column = 'price_btc'
-times = [datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0)]
-window = [20]
-perend = [0]
-winX = [4,6,8,10,12]
-hrX = [4,8,12,16,24]
-winY = [2,3]
-hrY = [4,8,12,16,24]
-N1 = [5,8,11,15,20]
-N2 = [1,2]
-
-#now = datetime.datetime.now()
-#filename = 'ResultFrame{}.csv'.format(now)
-ResultFrame = pd.DataFrame(columns = ['window','perend','winX','hrX','winY','hrY','N1','N2','period%return','SR','KC','AvgRPD'])
-#ResultFrame.to_csv(filename)
+''' Graveyard
 
 i=0
 for win in window:
@@ -433,7 +459,7 @@ for win in window:
                                 for t in times:
                                     i=i+1
                                     print wX, hX, wY, hY, n1, n2
-                                    [wallet, selltx, dailystats, results] = runtest(window=win, perend=pend, winX=wX, hrX=hX,
+                                    [wallet, selltx, dailystats, results] = runtest(cmcdf=cmcdf,tablelist=tablelist, window=win, perend=pend, winX=wX, hrX=hX,
                                                                                 winY=wY, hrY=hY, column='price_btc', N1=n1,
                                                                                 N2=n2, t=t, p=False)
 
@@ -451,3 +477,64 @@ nas = results[results['period%return'].isnull()]
 filename = 'ResultFrame{}.csv'.format(now)
 ResultFrame = pd.DataFrame(columns = ['window','perend','winX','hrX','winY','hrY','N1','N2','period%return','SR','KC','AvgRPD','AvgTrans'])
 ResultFrame.to_csv(filename)
+
+def runtestone(runq,qout,cmcdf,tablelist):
+    [i, win, pend, wX, hX, wY, hY, n1, n2, t] = runq.get()
+    print wX, hX, wY, hY, n1, n2
+    [wallet, selltx, dailystats, results] = runtest(cmcdf=cmcdf, tablelist=tablelist, window=win, perend=pend, winX=wX,
+                                                    hrX=hX, winY=wY, hrY=hY, column='price_btc', N1=n1, N2=n2, t=t, p=False)
+    [SR, KC, periodreturn, AvgTrans, AvgRPD] = [results[0], results[1], results[2], results[3], results[4]]
+    #newrow = [win, pend, wX, hX, wY, hY, n1, n2, periodreturn, SR, KC, AvgRPD]
+    RF = pd.DataFrame(
+        {'AvgTrans': AvgTrans, 'window': win, 'perend': pend, 'winX': wX, 'hrX': hX, 'winY': wY, 'hrY': hY, 'N1': n1,
+         'N2': n2, 'period%return': periodreturn, 'SR': SR, 'KC': KC, 'AvgRPD': AvgRPD}, index=[i],
+        columns=['window', 'perend', 'winX', 'hrX', 'winY', 'hrY', 'N1', 'N2', 'period%return', 'SR', 'KC', 'AvgRPD',
+                 'AvgTrans'])
+    with open('mycsv.csv', 'a') as f:
+        RF.to_csv(f, header=False)
+    qout.put(RF)
+    return
+
+
+def runtestoneMultiTimeAbbreviate(runq,qout,cmcdf,tablelist):
+    [i, win, pend, wX, hX, wY, hY, n1, n2, times] = runq.get()
+    print wX, hX, wY, hY, n1, n2
+    SRlist = []
+    KClist = []
+    PRlist = []
+    AvgTranslist = []
+    AvgRPDlist = []
+
+    for t in times:
+        [wallet, selltx, dailystats, results] = runtest(cmcdf=cmcdf, tablelist=tablelist, window=win, perend=pend, winX=wX,
+                                                    hrX=hX, winY=wY, hrY=hY, column='price_btc', N1=n1, N2=n2, t=t, p=False)
+        [SR, KC, periodreturn, AvgTrans, AvgRPD] = [results[0], results[1], results[2], results[3], results[4]]
+        SRlist.append(SR)
+        KClist.append(KC)
+        PRlist.append(periodreturn)
+        AvgTranslist.append(AvgTrans)
+        AvgRPDlist.append(AvgRPD)
+
+    SRa = np.mean(SRlist)
+    SRs = np.std(SRlist)
+    KCa = np.mean(KClist)
+    KCs = np.std(KClist)
+    PRa = np.mean(PRlist)
+    PRs = np.std(PRlist)
+    AvgTranslista = np.mean(AvgTranslist)
+    AvgTranslists = np.std(AvgTranslist)
+    AvgRPDlista = np.mean(AvgRPDlist)
+    AvgRPDlists = np.std(AvgRPDlist)
+
+    RF = pd.DataFrame(
+        {'AvgTrans': AvgTrans, 'window': win, 'perend': pend, 'winX': wX, 'hrX': hX, 'winY': wY, 'hrY': hY, 'N1': n1,
+         'N2': n2, 'per%returnAvg': PRa, 'SRAvg': SRa, 'KCAvg': KCa, 'AvgRPDAvg': AvgRPDa,
+                   'per%returnStdD': PRs, 'SRStdD': SRs, 'KCStdD': KCs, 'AvgRPDStD': AvgRPDs}, index=[i],
+        columns=['window', 'perend', 'winX', 'hrX', 'winY', 'hrY', 'N1', 'N2', 'per%returnAvg', 'per%returnStdD',
+                 'SRAvg', 'SRStdD', 'KCAvg', 'KCStdD', 'AvgRPDAvg','AvgRPDStdD','AvgTransAvg','AvgTransStdD'])
+    with open('mycsv.csv', 'a') as f:
+        RF.to_csv(f, header=False)
+    qout.put(RF)
+    return
+
+'''

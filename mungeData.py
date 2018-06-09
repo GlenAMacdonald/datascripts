@@ -128,7 +128,7 @@ column = 'price_btc'
 df = avgrnkba(top200,column,window,period,periodend)
 df2 = avgrnkba(top200,column,6,7,0)
 df3 = avgrnkba(top200,column,3,3,0)
-df4 = avgrnkba(top200,column,2,1,0)
+df4 = avgrnkba(top200,column,2,1,0) 
 
 df.iloc[-40:].to_csv('win12h-period21d.csv')
 df2.iloc[-40:].to_csv('win6h-period7d.csv')
