@@ -11,6 +11,7 @@ import numpy as np
 import copy
 import itertools
 import multiprocessing
+import time
 
 # ParallelNtop aims to be the parallelized version of NTopWindow
 # It loads the entire HDF5 data store into memory and uses it instead of relying on the HDD store
@@ -33,7 +34,7 @@ def load_data_into_mem():
 
 def get_data_range(cmcdf,tablelist,winper,perend,column):
     [window, period, periodend] = mungeData.conv_win_2_block(0, winper, perend)
-    lastupdate = datetime.datetime.strptime(min(tablelist.last_updated),"%Y-%m-%d %H:%M")
+    lastupdate = datetime.datetime.strptime(max(tablelist.last_updated),"%Y-%m-%d %H:%M")
     if periodend == 0:
         enddate = lastupdate
     else:
@@ -344,8 +345,8 @@ def runtest(cmcdf,tablelist,window, perend, winX, hrX, winY, hrY, column, N1, N2
         results = [0,0,0,0,0]
     return wallet, selltx, dailystats, results
 
-def createrunq(i, window, perend, winX, hrX, winY, hrY, N1, N2, times):
-    runq = multiprocessing.Queue()
+def createrunq(i, window, perend, winX, hrX, winY, hrY, N1, N2, times, runq):
+    #runq = multiprocessing.Queue()
     for win in window:
         for pend in perend:
             for wX in winX:
@@ -356,9 +357,12 @@ def createrunq(i, window, perend, winX, hrX, winY, hrY, N1, N2, times):
                         for hY in hrY:
                             for n1 in N1:
                                 for n2 in N2:
-                                    runq.put([i, win, pend, wX, hX, wY, hY, n1, n2, times])
-                                    i = i + 1
-    return runq
+                                    if n2 >= n1:
+                                        break
+                                    else:
+                                        runq.put([i, win, pend, wX, hX, wY, hY, n1, n2, times])
+                                        i = i + 1
+    return
 
 def startloop(nthreads, runq, qout,cmcdf,tablelist):
     plist = []
@@ -367,50 +371,57 @@ def startloop(nthreads, runq, qout,cmcdf,tablelist):
         plist.append(p)
     for p in plist:
         p.start()
+        time.sleep(0.1)
     for p in plist:
         p.join()
     return
 
 def runloop(runq,qout,cmcdf,tablelist):
     while runq.qsize() > 0:
-        runtestoneManyTimes(runq,qout,cmcdf,tablelist)
+        try:
+            runtestoneManyTimes(runq,qout,cmcdf,tablelist)
+        except:
+            pass
     return
 
 def runtestoneManyTimes(runq,qout,cmcdf,tablelist):
     [i, win, pend, wX, hX, wY, hY, n1, n2, times] = runq.get()
-    print wX, hX, wY, hY, n1, n2
-    for t in times:
-        timestring = datetime.time.strftime(t.time(), format="%H:%M")
-        print wX, hX, wY, hY, n1, n2
-        [wallet, selltx, dailystats, results] = runtest(cmcdf=cmcdf, tablelist=tablelist, window=win, perend=pend, winX=wX,
+    try:
+        for t in times:
+            timestring = datetime.time.strftime(t.time(), format="%H:%M")
+            print wX, hX, wY, hY, n1, n2, timestring
+            #print wX, hX, wY, hY, n1, n2
+            [wallet, selltx, dailystats, results] = runtest(cmcdf=cmcdf, tablelist=tablelist, window=win, perend=pend, winX=wX,
                                                         hrX=hX, winY=wY, hrY=hY, column='price_btc', N1=n1, N2=n2, t=t, p=False)
-        [SR, KC, periodreturn, AvgTrans, AvgRPD] = [results[0], results[1], results[2], results[3], results[4]]
-        #newrow = [win, pend, wX, hX, wY, hY, n1, n2, periodreturn, SR, KC, AvgRPD]
-        RF = pd.DataFrame(
-            {'AvgTrans': AvgTrans, 'window': win, 'perend': pend, 'winX': wX, 'hrX': hX, 'winY': wY, 'hrY': hY, 'N1': n1,
-             'N2': n2, 'period%return': periodreturn, 'SR': SR, 'KC': KC, 'AvgRPD': AvgRPD, 'time': timestring}, index=[i],
-             columns=['window', 'perend', 'winX', 'hrX', 'winY', 'hrY', 'N1', 'N2', 'period%return', 'SR', 'KC', 'AvgRPD',
+            [SR, KC, periodreturn, AvgTrans, AvgRPD] = [results[0], results[1], results[2], results[3], results[4]]
+            #newrow = [win, pend, wX, hX, wY, hY, n1, n2, periodreturn, SR, KC, AvgRPD]
+            RF = pd.DataFrame(
+                {'AvgTrans': AvgTrans, 'window': win, 'perend': pend, 'winX': wX, 'hrX': hX, 'winY': wY, 'hrY': hY, 'N1': n1,
+                 'N2': n2, 'period%return': periodreturn, 'SR': SR, 'KC': KC, 'AvgRPD': AvgRPD, 'time': timestring}, index=[i],
+                 columns=['window', 'perend', 'winX', 'hrX', 'winY', 'hrY', 'N1', 'N2', 'period%return', 'SR', 'KC', 'AvgRPD',
                      'AvgTrans','time'])
-        with open('mycsv.csv', 'a') as f:
-            RF.to_csv(f, header=False)
-        qout.put(RF)
-
+            with open('mycsv.csv', 'a') as f:
+                RF.to_csv(f, header=False)
+            qout.put(RF)
+    except:
+        print 'Error in ', timestring, wx, hx, wy, hy, n1, n2
     return
+
 
 
 ##----- Variable Script ---
 [cmcdf, tablelist] = load_data_into_mem()
 
-i=1
+i=19302
 column = 'price_btc'
-window = [12,30,60]
+window = [12,30]
 perend = [0]
-winX = [4,6,8,10,12]
-hrX = [4,8,12,16,24]
-winY = [1,2,3,4,5,6]
-hrY = [4,8,12,16,24]
-N1 = [5,8,11,15,20]
-N2 = [1,2]
+winX = [1,2,3,4]
+hrX = [1,2,3,4,6,8,12]
+winY = [1,2,3]
+hrY = [1,2,3,4,6,8,12]
+N1 = [5,8,11,15,20,25]
+N2 = [2,3,4,5,6,7,8,15]
 times = [datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0),
          datetime.datetime(year=1, month=1, day=1, hour=5, minute=0),
          datetime.datetime(year=1, month=1, day=1, hour=9, minute=0),
@@ -420,22 +431,27 @@ times = [datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0),
 
 #multiple Thread
 nthreads = multiprocessing.cpu_count()
-runq = createrunq(i, window, perend, winX, hrX, winY, hrY, N1, N2, times)
+runq = multiprocessing.Queue()
+createrunq(i, window, perend, winX, hrX, winY, hrY, N1, N2, times, runq)
 qout = multiprocessing.Queue()
 startloop(nthreads, runq, qout,cmcdf,tablelist)
 
 #Single Executable instance
 
-window = 20
+pd.set_option('display.width',500)
+
+[cmcdf, tablelist] = load_data_into_mem()
+
+window = 60
 perend = 0
 winX = 4
-hrX = 4
-winY = 2
+hrX = 8
+winY = 3
 hrY = 4
-N1 = 13
-N2 = 1
+N1 = 15
+N2 = 2
 column = 'price_btc'
-t = datetime.datetime(year = 1,month = 1,day=1, hour=1, minute = 0)
+t = datetime.datetime(year = 1,month = 1,day=1, hour=0, minute = 30)
 
 p = True
 #runtest(window, perend, winX, hrX, winY, hrY, column, N1, N2)

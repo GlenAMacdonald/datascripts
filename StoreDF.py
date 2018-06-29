@@ -14,7 +14,7 @@ market = cmc.Market()
 '''
 #Initiate dataset
 top400 = identify_top400()
-data = init_dl_top400(top400)
+data = init_dl_top400_2(top400)
 init_dset(datasetname, data)
 
 
@@ -54,6 +54,7 @@ def identify_top400():
     df3 = pd.DataFrame(market.ticker('?start=200&limit=299'))
     df4 = pd.DataFrame(market.ticker('?start=300&limit=399'))
     top400 = pd.concat([df1,df2,df3,df4],ignore_index=True)
+    top400.symbol = top400.symbol.str.replace('$','d')
     return top400
 
 def init_dl_top400(top400):
@@ -136,7 +137,7 @@ def get_last_update(datasetname):
 def update_top200(datasetname):
     store = select_HDFstore(datasetname)
     tlisth5 = store.get('tablelistH5')
-    top200 = identify_top200()
+    top200 = identify_top400()
     top200syms = top200.symbol.tolist()
     tlisth5syms = tlisth5.index.tolist()
     newsyms = list(set(top200syms).difference(tlisth5syms))
@@ -181,7 +182,10 @@ def restore_tlisth5(datasetname):
     store = select_HDFstore(datasetname)
     keys = store.keys()
     stripped_keys = list(map(lambda x: x.strip('/'), keys))
-    stripped_keys.remove('tablelistH5')
+    try:
+        stripped_keys.remove('tablelistH5')
+    except:
+        print "No tablelist"
     tlisth5 = pd.DataFrame(stripped_keys, columns=['sym'])
     tlisth5['last_updated'] = 0
     tlisth5.set_index('sym', drop=True, inplace=True)
